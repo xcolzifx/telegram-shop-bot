@@ -2,24 +2,19 @@ import os
 import sqlite3
 from datetime import datetime
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 
-
-# =========================================================
+# =========================
 # CONFIG
-# =========================================================
+# =========================
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "123456")
@@ -32,9 +27,9 @@ if not TOKEN:
 DB_FILE = "shop.db"
 
 
-# =========================================================
+# =========================
 # DATABASE
-# =========================================================
+# =========================
 
 def db():
     return sqlite3.connect(DB_FILE)
@@ -97,7 +92,7 @@ def init_db():
 
     for key, value in defaults.items():
         cur.execute(
-            "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",
+            "INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)",
             (key, value),
         )
 
@@ -108,37 +103,48 @@ def init_db():
 def get_setting(key):
     conn = db()
     cur = conn.cursor()
-    cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+
+    cur.execute(
+        "SELECT value FROM settings WHERE key=?",
+        (key,),
+    )
+
     row = cur.fetchone()
     conn.close()
+
     return row[0] if row else "Not configured"
 
 
 def set_setting(key, value):
     conn = db()
     cur = conn.cursor()
+
     cur.execute(
-        "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+        "INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)",
         (key, value),
     )
+
     conn.commit()
     conn.close()
 
-
-# =========================================================
-# USERS
-# =========================================================
 
 def save_user(user):
     conn = db()
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO users(user_id, username, first_name, created_at)
+        INSERT INTO users(
+            user_id,
+            username,
+            first_name,
+            created_at
+        )
         VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-        username=excluded.username,
-        first_name=excluded.first_name
+
+        ON CONFLICT(user_id)
+        DO UPDATE SET
+            username=excluded.username,
+            first_name=excluded.first_name
     """, (
         user.id,
         user.username or "",
@@ -153,49 +159,77 @@ def save_user(user):
 def is_banned(user_id):
     conn = db()
     cur = conn.cursor()
+
     cur.execute(
         "SELECT banned FROM users WHERE user_id=?",
         (user_id,),
     )
+
     row = cur.fetchone()
     conn.close()
 
     return bool(row and row[0] == 1)
 
 
-# =========================================================
+# =========================
 # ADMIN
-# =========================================================
+# =========================
 
 def is_admin(update):
-    user_id = str(update.effective_user.id)
+    if not ADMIN_ID:
+        return False
 
-    if ADMIN_ID and user_id == ADMIN_ID:
-        return True
-
-    return False
+    return str(update.effective_user.id) == ADMIN_ID
 
 
-async def admin_required(update):
-    if is_admin(update):
-        return True
+def admin_menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "➕ ADD PRODUCT",
+                callback_data="admin_add"
+            ),
+            InlineKeyboardButton(
+                "✏️ EDIT",
+                callback_data="admin_edit"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "🗑️ DELETE",
+                callback_data="admin_delete"
+            ),
+            InlineKeyboardButton(
+                "📦 PRODUCTS",
+                callback_data="admin_products"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "📋 ORDERS",
+                callback_data="admin_orders"
+            ),
+            InlineKeyboardButton(
+                "👤 USERS",
+                callback_data="admin_users"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "📊 STATS",
+                callback_data="admin_stats"
+            ),
+            InlineKeyboardButton(
+                "⚙️ SETTINGS",
+                callback_data="admin_settings"
+            ),
+        ],
+    ])
 
-    user_id = update.effective_user.id
-    context = update._effective_message
 
-    if context:
-        await context.reply_text(
-            "🔐 <b>ADMIN ACCESS</b>\n\n"
-            "Please use /admin and enter the admin password.",
-            parse_mode="HTML",
-        )
-
-    return False
-
-
-# =========================================================
-# KEYBOARDS
-# =========================================================
+# =========================
+# USER MENU
+# =========================
 
 def main_menu():
     return InlineKeyboardMarkup([
@@ -213,35 +247,14 @@ def main_menu():
             InlineKeyboardButton(
                 "📞 SUPPORT",
                 callback_data="support"
-            )
+            ),
         ],
     ])
 
 
-def admin_menu():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("➕ ADD PRODUCT", callback_data="admin_add"),
-            InlineKeyboardButton("✏️ EDIT", callback_data="admin_edit"),
-        ],
-        [
-            InlineKeyboardButton("🗑️ DELETE", callback_data="admin_delete"),
-            InlineKeyboardButton("📦 STOCK", callback_data="admin_stock"),
-        ],
-        [
-            InlineKeyboardButton("📋 ORDERS", callback_data="admin_orders"),
-            InlineKeyboardButton("👤 USERS", callback_data="admin_users"),
-        ],
-        [
-            InlineKeyboardButton("📊 STATS", callback_data="admin_stats"),
-            InlineKeyboardButton("⚙️ SETTINGS", callback_data="admin_settings"),
-        ],
-    ])
-
-
-# =========================================================
+# =========================
 # START
-# =========================================================
+# =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(update.effective_user)
@@ -263,9 +276,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
+# =========================
 # SHOP
-# =========================================================
+# =========================
 
 async def show_shop(query):
     conn = db()
@@ -285,10 +298,15 @@ async def show_shop(query):
         await query.edit_message_text(
             "🛍️ <b>SHOP</b>\n\n"
             "📦 No products are available yet.",
-            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏠 HOME", callback_data="home")]
+                [
+                    InlineKeyboardButton(
+                        "🏠 HOME",
+                        callback_data="home"
+                    )
+                ]
             ]),
+            parse_mode="HTML",
         )
         return
 
@@ -303,7 +321,10 @@ async def show_shop(query):
         ])
 
     buttons.append([
-        InlineKeyboardButton("🏠 HOME", callback_data="home")
+        InlineKeyboardButton(
+            "🏠 HOME",
+            callback_data="home"
+        )
     ])
 
     await query.edit_message_text(
@@ -319,7 +340,11 @@ async def show_product(query, product_id):
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT id,name,price,stock FROM products WHERE id=? AND active=1",
+        """
+        SELECT id, name, price, stock
+        FROM products
+        WHERE id=? AND active=1
+        """,
         (product_id,),
     )
 
@@ -327,7 +352,10 @@ async def show_product(query, product_id):
     conn.close()
 
     if not product:
-        await query.answer("Product not found.", show_alert=True)
+        await query.answer(
+            "Product not found.",
+            show_alert=True
+        )
         return
 
     pid, name, price, stock = product
@@ -341,13 +369,13 @@ async def show_product(query, product_id):
         [
             InlineKeyboardButton(
                 "🛒 BUY NOW",
-                callback_data=f"buy:{pid}",
+                callback_data=f"buy:{pid}"
             )
         ],
         [
             InlineKeyboardButton(
                 "⬅️ BACK",
-                callback_data="shop",
+                callback_data="shop"
             )
         ],
     ]
@@ -362,16 +390,20 @@ async def show_product(query, product_id):
     )
 
 
-# =========================================================
-# BUY
-# =========================================================
+# =========================
+# PAYMENT
+# =========================
 
 async def choose_payment(query, context, product_id):
     conn = db()
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT name,price,stock FROM products WHERE id=? AND active=1",
+        """
+        SELECT name, price, stock
+        FROM products
+        WHERE id=? AND active=1
+        """,
         (product_id,),
     )
 
@@ -379,45 +411,50 @@ async def choose_payment(query, context, product_id):
     conn.close()
 
     if not product:
-        await query.answer("Product unavailable.", show_alert=True)
+        await query.answer(
+            "Product unavailable.",
+            show_alert=True
+        )
         return
 
     name, price, stock = product
 
     if stock <= 0:
-        await query.answer("Out of stock!", show_alert=True)
+        await query.answer(
+            "Out of stock!",
+            show_alert=True
+        )
         return
 
     context.user_data["buy_product"] = product_id
-    context.user_data["buy_price"] = price
 
     keyboard = [
         [
             InlineKeyboardButton(
                 "⭐ TELEGRAM STARS",
-                callback_data="pay:stars",
+                callback_data="pay:stars"
             )
         ],
         [
             InlineKeyboardButton(
                 "💵 bKash",
-                callback_data="pay:bkash",
+                callback_data="pay:bkash"
             ),
             InlineKeyboardButton(
                 "💚 Nagad",
-                callback_data="pay:nagad",
+                callback_data="pay:nagad"
             ),
         ],
         [
             InlineKeyboardButton(
                 "🪙 CRYPTO",
-                callback_data="pay:crypto",
+                callback_data="pay:crypto"
             )
         ],
         [
             InlineKeyboardButton(
                 "⬅️ BACK",
-                callback_data=f"product:{product_id}",
+                callback_data=f"product:{product_id}"
             )
         ],
     ]
@@ -436,7 +473,10 @@ async def choose_quantity(query, context, payment_method):
     product_id = context.user_data.get("buy_product")
 
     if not product_id:
-        await query.answer("Order session expired.", show_alert=True)
+        await query.answer(
+            "Order session expired.",
+            show_alert=True
+        )
         return
 
     context.user_data["payment_method"] = payment_method
@@ -450,6 +490,10 @@ async def choose_quantity(query, context, payment_method):
     )
 
 
+# =========================
+# TEXT PROCESSING
+# =========================
+
 async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(update.effective_user)
 
@@ -458,8 +502,9 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
-    # Admin password
+    # ADMIN PASSWORD
     if context.user_data.get("awaiting_admin_password"):
+
         context.user_data["awaiting_admin_password"] = False
 
         if text == ADMIN_PASSWORD:
@@ -477,23 +522,27 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # Admin states
+    # ADMIN FUNCTIONS
     if context.user_data.get("admin"):
-        handled = await handle_admin_text(update, context)
+        handled = await handle_admin_text(
+            update,
+            context
+        )
 
         if handled:
             return
 
-    # Quantity
+    # QUANTITY
     if context.user_data.get("awaiting_quantity"):
-        context.user_data["awaiting_quantity"] = False
 
         try:
             quantity = int(text)
         except ValueError:
             await update.message.reply_text(
-                "❌ Please send a number.\nExample: 1"
+                "❌ Please send a number.\n\n"
+                "Example: 1"
             )
+
             context.user_data["awaiting_quantity"] = True
             return
 
@@ -501,17 +550,24 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "❌ Quantity must be at least 1."
             )
+
             context.user_data["awaiting_quantity"] = True
             return
 
         product_id = context.user_data.get("buy_product")
-        payment_method = context.user_data.get("payment_method")
+        payment_method = context.user_data.get(
+            "payment_method"
+        )
 
         conn = db()
         cur = conn.cursor()
 
         cur.execute(
-            "SELECT name,price,stock FROM products WHERE id=?",
+            """
+            SELECT name, price, stock
+            FROM products
+            WHERE id=?
+            """,
             (product_id,),
         )
 
@@ -530,6 +586,8 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"❌ Only {stock} item(s) available."
             )
+
+            context.user_data["awaiting_quantity"] = True
             return
 
         total = price * quantity
@@ -538,7 +596,14 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["total"] = total
         context.user_data["awaiting_transaction"] = True
 
-        instruction = get_setting(payment_method)
+        setting_key = {
+            "Telegram Stars": "stars",
+            "bKash": "bkash",
+            "Nagad": "nagad",
+            "Crypto": "crypto",
+        }.get(payment_method, "support")
+
+        instruction = get_setting(setting_key)
 
         await update.message.reply_text(
             f"💳 <b>{payment_method.upper()}</b>\n\n"
@@ -547,20 +612,30 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 Total: ৳{total:g}\n\n"
             f"💸 Payment Info:\n"
             f"<code>{instruction}</code>\n\n"
-            "After payment, send your <b>Transaction ID</b> here.",
+            "After payment, send your "
+            "<b>Transaction ID</b> here.",
             parse_mode="HTML",
         )
 
         return
 
-    # Transaction ID
+    # TRANSACTION ID
     if context.user_data.get("awaiting_transaction"):
+
         context.user_data["awaiting_transaction"] = False
 
-        product_id = context.user_data.get("buy_product")
-        quantity = context.user_data.get("quantity")
-        total = context.user_data.get("total")
-        payment_method = context.user_data.get("payment_method")
+        product_id = context.user_data.get(
+            "buy_product"
+        )
+        quantity = context.user_data.get(
+            "quantity"
+        )
+        total = context.user_data.get(
+            "total"
+        )
+        payment_method = context.user_data.get(
+            "payment_method"
+        )
 
         conn = db()
         cur = conn.cursor()
@@ -574,6 +649,7 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not row:
             conn.close()
+
             await update.message.reply_text(
                 "❌ Product not found."
             )
@@ -581,7 +657,8 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         product_name = row[0]
 
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO orders(
                 user_id,
                 username,
@@ -594,18 +671,23 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-        """, (
-            update.effective_user.id,
-            update.effective_user.username or "",
-            product_id,
-            product_name,
-            quantity,
-            total,
-            payment_method,
-            text,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                update.effective_user.id,
+                update.effective_user.username or "",
+                product_id,
+                product_name,
+                quantity,
+                total,
+                payment_method,
+                text,
+                "pending",
+                datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+            ),
+        )
 
         order_id = cur.lastrowid
 
@@ -624,8 +706,9 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-        # Notify admin
+        # ADMIN NOTIFICATION
         if ADMIN_ID:
+
             try:
                 await context.bot.send_message(
                     chat_id=int(ADMIN_ID),
@@ -655,20 +738,27 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         ]
                     ]),
                 )
+
             except Exception as e:
-                print("Admin notification error:", e)
+                print(
+                    "Admin notification error:",
+                    e
+                )
 
         return
 
 
-# =========================================================
-# ADMIN TEXT HANDLER
-# =========================================================
+# =========================
+# ADMIN TEXT FUNCTIONS
+# =========================
 
 async def handle_admin_text(update, context):
+
     text = update.message.text.strip()
 
+    # ADD PRODUCT
     if context.user_data.get("admin_add"):
+
         parts = text.split("|")
 
         if len(parts) != 3:
@@ -686,7 +776,7 @@ async def handle_admin_text(update, context):
             stock = int(parts[2].strip())
         except ValueError:
             await update.message.reply_text(
-                "❌ Price/Stock must be numbers."
+                "❌ Price and Stock must be numbers."
             )
             return True
 
@@ -694,7 +784,14 @@ async def handle_admin_text(update, context):
         cur = conn.cursor()
 
         cur.execute(
-            "INSERT INTO products(name,price,stock) VALUES(?,?,?)",
+            """
+            INSERT INTO products(
+                name,
+                price,
+                stock
+            )
+            VALUES (?, ?, ?)
+            """,
             (name, price, stock),
         )
 
@@ -704,27 +801,33 @@ async def handle_admin_text(update, context):
         context.user_data["admin_add"] = False
 
         await update.message.reply_text(
-            f"✅ Product added!\n\n"
+            f"✅ <b>PRODUCT ADDED!</b>\n\n"
             f"📦 {name}\n"
             f"💰 ৳{price:g}\n"
-            f"📦 Stock: {stock}"
+            f"📦 Stock: {stock}",
+            parse_mode="HTML",
         )
 
         return True
 
+    # EDIT PRODUCT
     if context.user_data.get("admin_edit"):
+
         parts = text.split("|")
 
         if len(parts) != 3:
             await update.message.reply_text(
-                "Format:\nProduct ID | New Price | New Stock"
+                "❌ Format:\n\n"
+                "Product ID | New Price | New Stock\n\n"
+                "Example:\n"
+                "1 | 150 | 30"
             )
             return True
 
         try:
-            product_id = int(parts[0])
-            price = float(parts[1])
-            stock = int(parts[2])
+            product_id = int(parts[0].strip())
+            price = float(parts[1].strip())
+            stock = int(parts[2].strip())
         except ValueError:
             await update.message.reply_text(
                 "❌ Invalid numbers."
@@ -735,39 +838,62 @@ async def handle_admin_text(update, context):
         cur = conn.cursor()
 
         cur.execute(
-            "UPDATE products SET price=?, stock=? WHERE id=?",
-            (price, stock, product_id),
-        )
+            # =========================
+# ERROR HANDLER
+# =========================
 
-        conn.commit()
-        conn.close()
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    print(
+        "ERROR:",
+        context.error
+    )
 
-        context.user_data["admin_edit"] = False
 
-        await update.message.reply_text(
-            "✅ Product updated!"
-        )
+# =========================
+# START BOT
+# =========================
 
-        return True
+init_db()
 
-    if context.user_data.get("admin_delete"):
-        try:
-            product_id = int(text)
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Send Product ID."
-            )
-            return True
+app = Application.builder().token(TOKEN).build()
 
-        conn = db()
-        cur = conn.cursor()
+app.add_handler(
+    CommandHandler(
+        "start",
+        start
+    )
+)
 
-        cur.execute(
-            "UPDATE products SET active=0 WHERE id=?",
-            (product_id,),
-        )
+app.add_handler(
+    CommandHandler(
+        "admin",
+        admin
+    )
+)
 
-        conn.commit()
-        conn.close()
+app.add_handler(
+    CallbackQueryHandler(
+        callback_handler
+    )
+)
 
-        context.
+app.add_handler(
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        process_text
+    )
+)
+
+app.add_error_handler(
+    error_handler
+)
+
+print(
+    "🤖 SHOP BOT IS RUNNING..."
+)
+
+app.run_polling()
+   
